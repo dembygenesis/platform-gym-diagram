@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform Gym — System Design (learn-fast edition)</title>
+<style>
+  :root{
+    --bg:#0b0f14; --bg2:#0f151d; --panel:#131b25; --panel2:#172230;
+    --ink:#e6edf3; --mut:#8aa0b4; --dim:#5b7186; --line:#243443;
+    --edge:#38bdf8;      /* edge / networking */
+    --gitops:#a78bfa;    /* argocd / gitops */
+    --ci:#f59e0b;        /* ARC / CI / registry */
+    --secret:#34d399;    /* openbao / eso */
+    --data:#fb7185;      /* postgres / data */
+    --app:#22d3ee;       /* workloads */
+    --obs:#c084fc;       /* observability */
+    --infra:#94a3b8;     /* terraform / infra */
+    --warn:#f43f5e; --good:#22c55e;
+    --radius:14px; --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  html,body{overflow-x:hidden;max-width:100%}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 80% -10%, #16212e 0%, transparent 60%),
+      radial-gradient(1000px 500px at 0% 10%, #11202a 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--edge);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 22px 90px}
+
+  /* header */
+  header{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--ci);text-transform:uppercase}
+  h1{font-size:clamp(26px,4vw,42px);margin:0;letter-spacing:-.02em;
+     background:linear-gradient(90deg,#e6edf3,#9fd3ff 60%,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--mut);max-width:760px;font-size:15.5px}
+  .oneliner{margin-top:8px;padding:14px 18px;border:1px solid var(--line);border-radius:var(--radius);
+     background:linear-gradient(180deg,#101b26,#0d141c);font-family:var(--mono);font-size:14.5px}
+  .oneliner b{color:#fff}
+
+  /* sticky nav */
+  nav{position:sticky;top:0;z-index:50;margin:18px 0 6px;padding:10px;border:1px solid var(--line);
+      border-radius:999px;background:rgba(15,21,29,.82);backdrop-filter:blur(10px);
+      display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  nav a{font-size:12.5px;color:var(--mut);padding:6px 12px;border-radius:999px;font-weight:600}
+  nav a:hover{color:#fff;background:#1b2734}
+
+  /* legend */
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 6px}
+  .chip{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mut);
+        border:1px solid var(--line);background:var(--panel);padding:5px 10px;border-radius:999px;cursor:default}
+  .dot{width:9px;height:9px;border-radius:50%}
+
+  section{margin-top:42px;scroll-margin-top:70px}
+  .sechead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .sechead h2{font-size:23px;margin:0;letter-spacing:-.01em}
+  .sechead .n{font-family:var(--mono);color:var(--dim);font-size:13px}
+  .lead{color:var(--mut);max-width:840px;margin:2px 0 18px;font-size:15px}
+
+  .panel{border:1px solid var(--line);border-radius:var(--radius);background:
+      linear-gradient(180deg,var(--panel),var(--bg2));padding:22px;position:relative;overflow:hidden}
+  .panel.tight{padding:16px}
+
+  /* flow rows */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;row-gap:18px}
+  .flow.vert{flex-direction:column;align-items:flex-start}
+  .node{position:relative;min-width:148px;max-width:230px;flex:1 1 0;
+        background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--c,#888);
+        border-radius:12px;padding:11px 13px;transition:transform .15s,box-shadow .15s,border-color .15s}
+  .node:hover{transform:translateY(-3px);box-shadow:0 10px 30px rgba(0,0,0,.45);border-color:var(--c)}
+  .node .ic{font-size:18px;line-height:1}
+  .node .t{font-weight:700;font-size:14px;margin-top:4px}
+  .node .s{font-family:var(--mono);font-size:11.5px;color:var(--c);margin-top:2px;word-break:break-all}
+  .node .d{font-size:12px;color:var(--mut);margin-top:6px}
+  .tag{position:absolute;top:8px;right:9px;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;
+       color:var(--dim);text-transform:uppercase;border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+
+  /* horizontal connector */
+  .arr{flex:0 0 46px;align-self:center;height:24px;position:relative;display:flex;align-items:center}
+  .arr i{position:absolute;left:4px;right:14px;height:0;border-top:2px dashed var(--ac,#3a4b5c);
+         animation:march 26s linear infinite}
+  .arr b{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--ac,#3a4b5c);font-size:13px}
+  .arr .lbl{position:absolute;top:-15px;left:0;right:0;text-align:center;font-size:10px;color:var(--mut);white-space:nowrap}
+  @keyframes march{to{background-position:600px 0}}
+  /* vertical connector */
+  .varr{height:30px;margin-left:26px;position:relative;width:2px;
+        background:repeating-linear-gradient(180deg,var(--ac,#3a4b5c) 0 6px,transparent 6px 12px)}
+  .varr b{position:absolute;bottom:-4px;left:-5px;color:var(--ac,#3a4b5c)}
+  .varr .lbl{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--mut);white-space:nowrap}
+
+  /* callouts */
+  .why{margin-top:14px;border-left:3px solid var(--gitops);background:#16121f;border-radius:0 10px 10px 0;
+       padding:10px 14px;font-size:13.5px;color:#d8c9ff}
+  .why b{color:#fff}
+  .why::before{content:'WHY ';font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--gitops)}
+
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+
+  /* ordering badges */
+  .ord{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+       font-family:var(--mono);font-size:12px;font-weight:700;color:#0b0f14;background:var(--c,#888);margin-right:8px;flex:0 0 auto}
+  .step{display:flex;align-items:flex-start;gap:4px;padding:10px 12px;border:1px solid var(--line);
+        border-radius:10px;background:var(--panel2);margin-bottom:8px}
+  .step .body .h{font-weight:700;font-size:14px}
+  .step .body .h code{font-family:var(--mono);font-size:12.5px;color:var(--app);background:#0c161e;padding:1px 6px;border-radius:6px}
+  .step .body .x{font-size:12.5px;color:var(--mut);margin-top:3px}
+  .constraint{border-color:#5a3b12;background:linear-gradient(180deg,#1c1408,#140f06)}
+  .constraint .body .h{color:#ffd591}
+
+  /* scars */
+  .scar{border:1px solid #3a1620;border-left:3px solid var(--warn);border-radius:12px;
+        background:linear-gradient(180deg,#1a0f14,#130b0f);padding:14px 16px}
+  .scar h4{margin:0 0 4px;font-size:14.5px;color:#ffb3c1}
+  .scar .sig{font-family:var(--mono);font-size:11.5px;color:var(--warn);margin-bottom:7px}
+  .scar p{margin:0;font-size:13px;color:var(--mut)}
+  .scar p b{color:#fff}
+  .scar .fix{margin-top:8px;font-family:var(--mono);font-size:11.5px;color:#9be7b0;background:#0c1712;
+             border:1px solid #163022;border-radius:8px;padding:7px 9px;display:block}
+
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;
+        border:1px solid var(--line);color:var(--mut)}
+  .ok{color:var(--good);border-color:#1d4a2c}
+  code.k{font-family:var(--mono);font-size:.92em;color:#bfe9ff;background:#0c1620;padding:1px 5px;border-radius:5px}
+
+  /* namespace map */
+  .nsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+  .ns{border:1px solid var(--line);border-top:3px solid var(--c,#888);border-radius:12px;background:var(--panel2);padding:12px 13px}
+  .ns .nm{font-family:var(--mono);font-size:12.5px;color:var(--c);font-weight:700}
+  .ns .role{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+  .ns ul{margin:0;padding-left:16px}
+  .ns li{font-size:12.5px;color:var(--mut);margin:2px 0}
+  .ns li b{color:var(--ink)}
+
+  footer{margin-top:60px;border-top:1px solid var(--line);padding-top:18px;color:var(--dim);font-size:12.5px}
+  .mark{color:var(--good)}
+
+  /* ---------- mobile-first responsive ---------- */
+  @media(max-width:680px){
+    .wrap{padding:18px 13px 64px}
+    h1{font-size:24px}
+    .sub{font-size:13.5px}
+    .oneliner{font-size:12px;padding:11px 12px;line-height:1.7}
+    nav{gap:4px;padding:7px;border-radius:18px;top:0}
+    nav a{font-size:11px;padding:5px 8px}
+    section{margin-top:32px;scroll-margin-top:60px}
+    .sechead h2{font-size:19px}
+    .lead{font-size:13.5px}
+    .panel{padding:14px}
+    .panel.tight{padding:13px}
+    .legend{gap:6px}
+    .chip{font-size:10.5px;padding:4px 8px}
+    .why{font-size:12.5px;padding:9px 12px}
+
+    /* every horizontal flow stacks vertically; arrows rotate to point down */
+    .flow:not(.vert){flex-direction:column;align-items:stretch}
+    .node{max-width:none;width:100%;min-width:0}
+    .arr{width:100%;height:30px;flex:0 0 30px;align-self:auto}
+    .arr i{left:50%;right:auto;top:3px;bottom:12px;height:auto;width:0;
+           border-top:0;border-left:2px dashed var(--ac,#3a4b5c);transform:translateX(-50%)}
+    .arr b{left:50%;right:auto;top:auto;bottom:0;transform:translateX(-50%)}
+    .arr .lbl{top:50%;left:calc(50% + 12px);right:auto;text-align:left;
+              transform:translateY(-50%);background:var(--bg2);padding:0 5px;border-radius:4px}
+    .varr{margin-left:16px}
+    .nsgrid{grid-template-columns:1fr}
+    .node .s{font-size:11px}
+  }
+  @media(max-width:380px){ h1{font-size:21px} .node{padding:10px 11px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">Platform Gym · UpCloud + k3s · GitOps · learn-fast map</div>
+    <h1>One <code class="k">git push</code> → a vault-backed, green-locked app — no human in the loop.</h1>
+    <p class="sub">This is the whole system on one page, drawn to be <i>understood</i>, not just admired. Colour = layer. Dashed lines = flow direction. Amber boxes = ordering constraints that bite if you get them wrong. Red cards at the bottom = the scars.</p>
+    <div class="oneliner">push&nbsp; ➜ &nbsp;<b style="color:var(--ci)">ARC</b> builds image&nbsp; ➜ &nbsp;push to <b style="color:var(--ci)">ghcr</b>&nbsp; ➜ &nbsp;<b style="color:var(--gitops)">Image Updater</b> bumps git tag&nbsp; ➜ &nbsp;<b style="color:var(--gitops)">ArgoCD</b> syncs&nbsp; ➜ &nbsp;Deployment rolls&nbsp; ➜ &nbsp;pulls secrets from <b style="color:var(--secret)">OpenBao</b>&nbsp; ➜ &nbsp;serves behind the <b style="color:var(--edge)">Gateway</b> 🔒</div>
+  </header>
+
+  <nav>
+    <a href="#loop">① The Loop</a>
+    <a href="#boot">② Bootstrap order</a>
+    <a href="#req">③ Request path</a>
+    <a href="#secret">④ Secret flow</a>
+    <a href="#map">⑤ Namespace map</a>
+    <a href="#scars">⑥ Scars</a>
+  </nav>
+
+  <div class="legend" id="legend">
+    <span class="chip"><span class="dot" style="background:var(--infra)"></span>Infra (Terraform)</span>
+    <span class="chip"><span class="dot" style="background:var(--edge)"></span>Edge / Networking</span>
+    <span class="chip"><span class="dot" style="background:var(--gitops)"></span>GitOps (ArgoCD)</span>
+    <span class="chip"><span class="dot" style="background:var(--ci)"></span>CI / Registry (ARC)</span>
+    <span class="chip"><span class="dot" style="background:var(--secret)"></span>Secrets (OpenBao/ESO)</span>
+    <span class="chip"><span class="dot" style="background:var(--data)"></span>Data (CloudNativePG)</span>
+    <span class="chip"><span class="dot" style="background:var(--app)"></span>Workloads</span>
+    <span class="chip"><span class="dot" style="background:var(--obs)"></span>Observability</span>
+  </div>
+
+  <!-- ===================== 1. THE LOOP ===================== -->
+  <section id="loop">
+    <div class="sechead"><span class="n">①</span><h2>The deploy loop — steady state</h2><span class="pill ok">PROVEN both apps · 0 manual steps</span></div>
+    <p class="lead">After bootstrap, this runs hands-off. The only "poll" in the whole system is Image Updater checking ghcr every <b>2 minutes</b> — everything else is event-driven. Follow the dashed line.</p>
+    <div class="panel">
+      <div class="flow">
+        <div class="node" style="--c:var(--app)"><span class="tag">you</span><div class="ic">⌨️</div><div class="t">git push</div><div class="s">→ main</div><div class="d">to <b>DembyOrg/backend_platform</b> or <b>/IM_frontend</b></div></div>
+        <div class="arr" style="--ac:var(--ci)"><span class="lbl">webhook</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--ci)"><span class="tag">ephemeral pod</span><div class="ic">🏃</div><div class="t">ARC runner</div><div class="s">runs-on: arc-hosted</div><div class="d">fresh pod per job, <b>scales to zero</b> when idle. GH App auth.</div></div>
+        <div class="arr" style="--ac:var(--ci)"><span class="lbl">go/docker build</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--ci)"><span class="tag">OCI registry</span><div class="ic">📦</div><div class="t">ghcr.io</div><div class="s">dembyorg/&lt;app&gt;:main-&lt;sha&gt;</div><div class="d">image tagged by git SHA</div></div>
+        <div class="arr" style="--ac:var(--gitops)"><span class="lbl">2-min poll</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--gitops)"><span class="tag">v0.17.0</span><div class="ic">🔎</div><div class="t">Image Updater</div><div class="s">write-back: git</div><div class="d">commits new <b>newTag</b> into the gitops kustomization</div></div>
+      </div>
+      <div class="varr" style="--ac:var(--gitops);margin-top:6px"><span class="lbl">git commit + push to platform-gym-gitops (origin/main)</span><b>▼</b></div>
+      <div class="flow">
+        <div class="node" style="--c:var(--gitops)"><span class="tag">app-of-apps</span><div class="ic">🎯</div><div class="t">ArgoCD</div><div class="s">root → 20 child apps</div><div class="d">sees the new commit, syncs the Deployment</div></div>
+        <div class="arr" style="--ac:var(--app)"><span class="lbl">rollout</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--app)"><span class="tag">k8s</span><div class="ic">🚀</div><div class="t">Deployment rolls</div><div class="s">backend / frontend</div><div class="d">new ReplicaSet, readiness-gated</div></div>
+        <div class="arr" style="--ac:var(--secret)"><span class="lbl">envFrom</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--secret)"><span class="tag">ESO synced</span><div class="ic">🔑</div><div class="t">pulls secrets</div><div class="s">OpenBao → ESO → Secret</div><div class="d">+ DB creds from CloudNativePG</div></div>
+        <div class="arr" style="--ac:var(--edge)"><span class="lbl">HTTPRoute</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--edge)"><span class="tag">🔒 TLS</span><div class="ic">🌐</div><div class="t">served live</div><div class="s">*.test.eufit.io</div><div class="d">green lock via the gym Gateway</div></div>
+      </div>
+      <div class="why"><b>Why Image Updater (poll) and not "CI commits the tag" (push)?</b> Either works. Poll decouples the app repo from the gitops repo — CI never needs write access to infra. The cost is one unavoidable 2-min latency: there's no push-event for "a new tag exists", so something has to look. That's the only non-event-driven hop in the system.</div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="panel tight"><div class="pill" style="color:var(--app)">last proven roll · backend</div>
+        <div style="margin-top:8px;font-family:var(--mono);font-size:13px">marker <b style="color:#fff">main-1ef19622</b> → built on ARC → Image Updater wrote <code class="k">newTag: main-1ef1962</code> → rolled <span class="ok pill">1/1</span> → <span class="ok pill">200</span> → <b style="color:var(--data)">25 528</b> content_blocks</div></div>
+      <div class="panel tight"><div class="pill" style="color:var(--app)">last proven roll · frontend</div>
+        <div style="margin-top:8px;font-family:var(--mono);font-size:13px">marker <b style="color:#fff">de0566d</b> → built on ARC → Image Updater wrote <code class="k">newTag: main-de0566d</code> → rolled <span class="ok pill">1/1</span> → <span class="ok pill">200</span> at <b style="color:var(--edge)">hub-gym</b></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== 2. BOOTSTRAP ===================== -->
+  <section id="boot">
+    <div class="sechead"><span class="n">②</span><h2>Bootstrap — the chicken-and-egg, in order</h2></div>
+    <p class="lead">GitOps can run everything <i>except the things GitOps needs to exist first</i>: the cluster, ArgoCD itself, repo read-access, the secret-zero, and stateful data. That's "the normalities." Two phases. The <span style="color:#ffd591">amber</span> steps are the three hard ordering constraints — everything else is order-independent.</p>
+
+    <div class="grid g2">
+      <div class="panel">
+        <div class="pill" style="color:var(--infra)">PHASE 1 · Terraform · from laptop</div>
+        <div style="margin-top:12px">
+          <div class="step"><span class="ord" style="--c:var(--infra)">1</span><div class="body"><div class="h"><code>terraform apply</code></div><div class="x">UpCloud server (2xCPU-4GB, fi-hel1, Ubuntu 24.04) + cloud-init installs <b>k3s v1.34.6+k3s1</b> + helm. Creates Cloudflare A + wildcard records → <b>94.237.113.110</b>, grey-cloud (DNS-only).</div></div></div>
+          <div class="step"><span class="ord" style="--c:var(--infra)">2</span><div class="body"><div class="h"><code>infra ssh-sync --ip …</code></div><div class="x">Repoints the <code>upcloud_infra</code> SSH alias at the fresh box (every recreate = new IP). Then verify: node <span class="ok pill">Ready</span>, helm present.</div></div></div>
+        </div>
+        <div class="why"><b>DNS must be grey-cloud (DNS-only), never proxied.</b> Orange-cloud makes <code class="k">dig</code> return Cloudflare IPs and silently breaks DNS-01 ACME → cert issuance hangs with no error.</div>
+      </div>
+
+      <div class="panel">
+        <div class="pill" style="color:var(--gitops)">PHASE 2 · normalities · scripts ssh in themselves</div>
+        <div style="margin-top:12px">
+          <div class="step"><span class="ord" style="--c:var(--gitops)">3</span><div class="body"><div class="h"><code>argocd.sh</code></div><div class="x">The <b>one</b> manual <code>helm install</code> in the whole platform — ArgoCD can't deploy itself.</div></div></div>
+          <div class="step"><span class="ord" style="--c:var(--gitops)">4</span><div class="body"><div class="h"><code>argocd-repo.sh</code></div><div class="x">SSH deploy key → ArgoCD can read the private gitops repo.</div></div></div>
+          <div class="step constraint"><span class="ord" style="--c:#f59e0b">5</span><div class="body"><div class="h"><code>restore-cert.sh</code> &nbsp;⟵ before root-app</div><div class="x">Pre-seed the wildcard TLS secret so cert-manager <b>adopts</b> it instead of calling Let's Encrypt. <b>0 LE calls</b> = no rate-limit risk.</div></div></div>
+          <div class="step constraint"><span class="ord" style="--c:#f59e0b">6</span><div class="body"><div class="h"><code>root-app.yaml</code></div><div class="x">Apply the app-of-apps. ArgoCD now deploys <b>everything</b> wave-ordered: gateway, cert-manager, external-dns, OpenBao, ESO, CNPG, ARC, Image Updater, backend, frontend, grafana, prometheus.</div></div></div>
+          <div class="step constraint"><span class="ord" style="--c:#f59e0b">7</span><div class="body"><div class="h"><code>openbao-bootstrap.sh</code> &nbsp;⟵ after root-app</div><div class="x">OpenBao must be <i>Running</i> to unseal. Unseal (1 key) + seed CF token, ARC App key, Grafana pw, 13 integration creds. cert-manager &amp; the ARC scale-set sit wave-gated until their secrets land, then reconcile themselves.</div></div></div>
+          <div class="step"><span class="ord" style="--c:var(--ci)">8</span><div class="body"><div class="h"><code>ghcr-secret.sh</code></div><div class="x">ghcr pull secrets (4 namespaces) + Image Updater git write-back creds.</div></div></div>
+          <div class="step constraint"><span class="ord" style="--c:#f59e0b">9</span><div class="body"><div class="h"><code>restore-data.sh</code> &nbsp;⟵ after backend /health</div><div class="x">Self-gates on the backend being <code>/health</code>-ready (proves CNPG made the schema + migrate ran). Then <b>data-only</b> TRUNCATE+COPY of 25 528 rows. No DROP SCHEMA → no crash-loop.</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <b style="color:#ffd591">The schema-ownership split</b> — the subtle one that makes restore safe:
+      <div class="flow" style="margin-top:12px">
+        <div class="node" style="--c:var(--data)"><div class="ic">🏗️</div><div class="t">CloudNativePG</div><div class="s">initdb</div><div class="d">creates the <b>empty</b> <code class="k">im_app</code> schema</div></div>
+        <div class="arr" style="--ac:var(--data)"><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--app)"><div class="ic">🧱</div><div class="t">backend migrate</div><div class="s">on boot</div><div class="d">creates the <b>objects</b> — tables, indexes, pg_trgm</div></div>
+        <div class="arr" style="--ac:var(--data)"><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--data)"><div class="ic">📥</div><div class="t">restore-data</div><div class="s">--data-only</div><div class="d">loads <b>rows only</b> — never touches structure</div></div>
+      </div>
+      <div class="why">Three owners, zero overlap. If restore did <code class="k">DROP SCHEMA</code> (the "obvious" reload), the backend's next migrate-check would find nothing and <b>crash-loop</b>. Data-only into migrate's schema means the backend is never knocked over.</div>
+    </div>
+  </section>
+
+  <!-- ===================== 3. REQUEST PATH ===================== -->
+  <section id="req">
+    <div class="sechead"><span class="n">③</span><h2>Request path — one Gateway, two singular routes</h2></div>
+    <p class="lead">There is exactly <b>one</b> Gateway. Each app hangs its own HTTPRoute off it, keyed by <b>hostname</b>. The Gateway never stitches them together — which is why the frontend↔backend link lives somewhere surprising.</p>
+    <div class="panel">
+      <div class="flow vert">
+        <div class="flow" style="width:100%">
+          <div class="node" style="--c:var(--app)"><div class="ic">🧑‍💻</div><div class="t">Browser</div><div class="s">DNS → 94.237.113.110</div></div>
+          <div class="arr" style="--ac:var(--edge)"><span class="lbl">:443</span><i></i><b>▶</b></div>
+          <div class="node" style="--c:var(--edge)"><span class="tag">NGINX GW Fabric</span><div class="ic">🚪</div><div class="t">rancher-gateway</div><div class="s">ns: demo · PROGRAMMED</div><div class="d">listeners :80 + :443, host <code class="k">*.test.eufit.io</code>. <b>Wildcard TLS terminates here</b> (<code class="k">wildcard-test-eufit-tls</code>).</div></div>
+          <div class="arr" style="--ac:var(--edge)"><span class="lbl">hostname match</span><i></i><b>▶</b></div>
+          <div class="node" style="--c:var(--edge)"><span class="tag">Gateway API</span><div class="ic">🔀</div><div class="t">HTTPRoute</div><div class="s">allowedRoutes: All</div><div class="d">picks the route whose hostname matches</div></div>
+        </div>
+        <div class="varr" style="--ac:var(--edge)"><span class="lbl">two routes, two hostnames</span><b>▼</b></div>
+        <div class="grid g2" style="width:100%">
+          <div>
+            <div class="flow">
+              <div class="node" style="--c:var(--edge)"><div class="ic">🟦</div><div class="t">frontend-hub</div><div class="s">hub-gym.test.eufit.io</div><div class="d">ns: demo · path /</div></div>
+              <div class="arr" style="--ac:var(--app)"><i></i><b>▶</b></div>
+              <div class="node" style="--c:var(--app)"><div class="ic">🟢</div><div class="t">Service frontend</div><div class="s">:3000 → app=frontend</div></div>
+            </div>
+          </div>
+          <div>
+            <div class="flow">
+              <div class="node" style="--c:var(--edge)"><div class="ic">🟪</div><div class="t">backend-platform</div><div class="s">backend-platform.test.eufit.io</div><div class="d">ns: database · path / · <b>cross-ns attach</b></div></div>
+              <div class="arr" style="--ac:var(--app)"><i></i><b>▶</b></div>
+              <div class="node" style="--c:var(--app)"><div class="ic">🟢</div><div class="t">Service backend</div><div class="s">:3002 → app=backend</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="why"><b>The backend route lives in <code class="k">database</code> but attaches to a Gateway in <code class="k">demo</code>.</b> That only works because the Gateway opted in with <code class="k">allowedRoutes.namespaces.from: All</code>. Note: only the <i>parentRef</i> crosses namespaces (governed by allowedRoutes) — each <i>backendRef</i> is same-namespace, so no ReferenceGrant is needed.</div>
+    </div>
+
+    <div class="panel" style="margin-top:14px;border-color:#2a3b52">
+      <b style="color:var(--edge)">The "gotcha" you spotted: how does the hub reach the backend API?</b>
+      <div class="grid g2" style="margin-top:12px">
+        <div>
+          <div class="flow vert">
+            <div class="node" style="--c:var(--app);max-width:none"><div class="t">1 · browser loads the hub UI</div><div class="s">GET hub-gym.test.eufit.io</div><div class="d">→ frontend-hub route → frontend:3000</div></div>
+            <div class="varr" style="--ac:var(--app)"><b>▼</b></div>
+            <div class="node" style="--c:var(--app);max-width:none"><div class="t">2 · that page's JS calls the API</div><div class="s">fetch https://backend-platform.test.eufit.io</div><div class="d">→ backend-platform route → backend:3002</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="why" style="margin-top:0"><b>The frontend pod never talks to the backend.</b> The <i>browser</i> does, against the backend's own public hostname — baked into the JS bundle at <code class="k">docker build</code> via <code class="k">--build-arg NEXT_PUBLIC_API_URL=https://backend-platform.test.eufit.io</code>. That's <i>why</i> two singular routes is correct: there's no server-side proxy to model.</div>
+          <div style="margin-top:10px;font-size:13px;color:var(--mut)">It's cross-origin (hub-gym → backend-platform), so it only works because the backend returns <code class="k">access-control-allow-origin: *</code> on preflight. <span class="pill" style="color:var(--warn)">verified 204</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 4. SECRET FLOW ===================== -->
+  <section id="secret">
+    <div class="sechead"><span class="n">④</span><h2>Secret flow — vault → agnostic interface → workload</h2></div>
+    <p class="lead">OpenBao is the source of truth. ESO is the agnostic adapter that turns a vault path into a plain k8s Secret. Workloads only ever see a normal Secret — they don't know OpenBao exists. The twist: <b>the CI's own credential comes from the vault too</b> (dogfooding).</p>
+    <div class="panel">
+      <div class="flow">
+        <div class="node" style="--c:var(--secret)"><span class="tag">unseal 1-key</span><div class="ic">🔐</div><div class="t">OpenBao</div><div class="s">KV-v2 @ secret/</div><div class="d">single replica. Unseal key + root token live in your <b>password manager</b>, not git.</div></div>
+        <div class="arr" style="--ac:var(--secret)"><span class="lbl">k8s auth</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--secret)"><span class="tag">ClusterSecretStore</span><div class="ic">🔁</div><div class="t">ESO</div><div class="s">openbao-store</div><div class="d">authenticates via its ServiceAccount (k8s auth method → role <code class="k">eso</code>)</div></div>
+        <div class="arr" style="--ac:var(--secret)"><span class="lbl">refresh 1m</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--secret)"><span class="tag">native</span><div class="ic">📄</div><div class="t">k8s Secret</div><div class="s">arc-github-app · backend-integrations · …</div><div class="d">ordinary Secret — created &amp; kept in sync by ESO</div></div>
+        <div class="arr" style="--ac:var(--app)"><span class="lbl">envFrom / mount</span><i></i><b>▶</b></div>
+        <div class="node" style="--c:var(--app)"><div class="ic">🫙</div><div class="t">Workload</div><div class="s">backend envFrom · ARC App key</div><div class="d">consumes it like any Secret</div></div>
+      </div>
+      <div class="why"><b>Dogfooding:</b> ARC authenticates to GitHub with a <b>GitHub App private key</b> that lives in OpenBao → synced by ESO → consumed by the controller. The thing that builds every image gets its own credential from the same pipeline it serves. That's also why bootstrap step 7 (unseal) gates the ARC scale-set: no secret, no runners — and the wave-ordering makes that race structurally impossible.</div>
+    </div>
+  </section>
+
+  <!-- ===================== 5. NAMESPACE MAP ===================== -->
+  <section id="map">
+    <div class="sechead"><span class="n">⑤</span><h2>What runs where — the namespace map</h2><span class="pill ok">35 pods · all Running · 0 restarts</span></div>
+    <p class="lead">One namespace per concern. 20 ArgoCD apps, all Synced/Healthy. Colour = layer (same legend as up top).</p>
+    <div class="nsgrid">
+      <div class="ns" style="--c:var(--gitops)"><div class="nm">argocd</div><div class="role">the GitOps spine</div><ul><li><b>application-controller</b>, server, repo-server</li><li>redis, dex, applicationset, notifications</li><li><b>image-updater</b> (the 2-min poll)</li></ul></div>
+      <div class="ns" style="--c:var(--ci)"><div class="nm">arc-systems</div><div class="role">CI control plane</div><ul><li>gha-rs-<b>controller</b></li><li>arc-hosted <b>listener</b></li></ul></div>
+      <div class="ns" style="--c:var(--ci)"><div class="nm">arc-runners</div><div class="role">CI execution</div><ul><li><b>0 pods when idle</b> — scale-to-zero</li><li>runner pod spawns per job, then vanishes</li></ul></div>
+      <div class="ns" style="--c:var(--edge)"><div class="nm">nginx-gateway</div><div class="role">edge controller</div><ul><li>nginx-gateway-fabric</li></ul></div>
+      <div class="ns" style="--c:var(--edge)"><div class="nm">cert-manager</div><div class="role">TLS issuance</div><ul><li>controller, cainjector, webhook</li><li>adopts the pre-seeded wildcard cert</li></ul></div>
+      <div class="ns" style="--c:var(--secret)"><div class="nm">openbao</div><div class="role">the vault</div><ul><li><b>openbao-0</b> (1/1 = unsealed)</li><li>agent-injector</li></ul></div>
+      <div class="ns" style="--c:var(--secret)"><div class="nm">external-secrets</div><div class="role">vault → k8s adapter</div><ul><li>ESO + cert-controller + webhook</li></ul></div>
+      <div class="ns" style="--c:var(--data)"><div class="nm">cnpg-system</div><div class="role">postgres operator</div><ul><li>cloudnative-pg</li></ul></div>
+      <div class="ns" style="--c:var(--data)"><div class="nm">database</div><div class="role">backend + its DB</div><ul><li><b>backend</b> (the Go API)</li><li><b>backend-pg-1</b> · im_app · 25 528 rows</li></ul></div>
+      <div class="ns" style="--c:var(--app)"><div class="nm">demo</div><div class="role">edge + frontends</div><ul><li><b>frontend</b> (the hub)</li><li>rancher-gateway-nginx + svclb</li><li>rancher1 / rancher2 <i>(old whoami — vestigial)</i></li></ul></div>
+      <div class="ns" style="--c:var(--obs)"><div class="nm">monitoring</div><div class="role">observability</div><ul><li>grafana, prometheus</li><li>operator, kube-state-metrics, node-exporter</li></ul></div>
+      <div class="ns" style="--c:var(--infra)"><div class="nm">kube-system</div><div class="role">k3s core</div><ul><li>coredns, metrics-server</li><li>local-path-provisioner, <b>svclb</b> (Klipper :80/:443)</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== 6. SCARS ===================== -->
+  <section id="scars">
+    <div class="sechead"><span class="n">⑥</span><h2>The scars — where this class of system bites</h2></div>
+    <p class="lead">The transferable gold. Not commands — <i>reflexes</i>. Each is a failure mode this exact build surfaced, with the move that fixes it. This is the page to re-read before you build #2 by hand.</p>
+    <div class="grid g2">
+      <div class="scar"><h4>Stale Terraform lock after an interrupted apply</h4><div class="sig">Error acquiring the state lock · .tfstate.lock.info lingers</div><p>An apply killed mid-flight leaves a lock with <b>no process behind it</b>. Don't blindly nuke it — first confirm no terraform is running <i>and</i> no orphaned server exists, or you'll double-provision.</p><span class="fix">pgrep terraform → check UpCloud server list → terraform force-unlock / rm lock.info → apply</span></div>
+
+      <div class="scar"><h4>Cert issuance after a rebuild — silent LE rate-limit</h4><div class="sig">Certificate stuck, no error · ACME quota burned</div><p>Letting cert-manager re-issue on every rebuild quietly eats Let's Encrypt's weekly quota. <b>Pre-seed the cert secret before root-app</b> so cert-manager <i>adopts</i> instead of issues.</p><span class="fix">restore-cert.sh BEFORE root-app · verify: 0 CertificateRequests</span></div>
+
+      <div class="scar"><h4>DB reload that crash-loops the backend</h4><div class="sig">backend: "no schema im_app" · CrashLoopBackOff</div><p>The obvious reload (<code class="k">DROP SCHEMA</code> + full restore) deletes the structure migrate owns → backend's migrate-check finds nothing. <b>Restore data-only</b> into the schema migrate built.</p><span class="fix">pg_dump --data-only --disable-triggers · gate on /health · TRUNCATE+COPY, never DROP</span></div>
+
+      <div class="scar"><h4>env.ts fails OPEN to production</h4><div class="sig">const apiUrl = NEXT_PUBLIC_API_URL || "https://im.eufit.io"</div><p>If the build-arg ever drops, the gym frontend silently calls <b>real prod</b>. A missing config should fail <i>loud</i>, not fall back to the most dangerous default.</p><span class="fix">assert the build-arg is present at build · or default to a safe/blank base</span></div>
+
+      <div class="scar"><h4>"No runner pods" looks broken — it's correct</h4><div class="sig">kubectl get pods -n arc-runners → empty</div><p>ARC scales to zero. A runner only exists for the life of a job. Empty when idle is the <b>design</b>, not an outage — the whole reason to migrate off always-on systemd runners.</p><span class="fix">push a commit → watch a runner pod appear, run, and vanish</span></div>
+
+      <div class="scar"><h4>Wildcard CORS + cross-origin hub→API</h4><div class="sig">access-control-allow-origin: *</div><p>The hub calls the backend from the browser across hostnames — only works because CORS is wide open. Fine for a gym; in prod, scope it to the hub origin or the call dies in preflight.</p><span class="fix">prod: allow-origin = the hub's exact origin, not *</span></div>
+
+      <div class="scar"><h4>Laptop DNS lies (this very session)</h4><div class="sig">curl → 000 "could not resolve host"</div><p>A negative-cached / blocked local resolver returns nothing even when the platform is perfectly healthy. Don't debug the cluster — <b>bypass DNS to prove the platform</b>, then fix the laptop.</p><span class="fix">curl --resolve host:443:94.237.113.110 … → flush: dscacheutil -flushcache</span></div>
+
+      <div class="scar"><h4>Stale local gitops clone deploys the wrong thing</h4><div class="sig">Image Updater commits to origin while your local lags</div><p>Scripts run from your <i>local</i> copy but ArgoCD syncs <i>origin/main</i>. A divergent local clone is how a clean rebuild once came up with 0 ARC runners.</p><span class="fix">ALWAYS: git pull --rebase origin main before any setup/teardown</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>Generated from the live cluster on the day of the rebuild · server <code class="k">94.237.113.110</code> · k3s <code class="k">v1.34.6+k3s1</code> · <span class="mark">all 20 ArgoCD apps Synced/Healthy</span>.</div>
+    <div style="margin-top:6px">Single self-contained file — no network, no CDN, no mermaid. Open it anywhere. Re-read section ⑥ before you extend this by hand.</div>
+  </footer>
+
+</div>
+</body>
+</html>

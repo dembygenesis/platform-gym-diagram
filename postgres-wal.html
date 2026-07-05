@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Postgres WAL — why 28 GB vanished on one git push</title>
+<style>
+  :root{
+    --bg:#0c1117; --card:#141b24; --card2:#18222e; --ink:#e8eef4; --mut:#93a4b6; --dim:#5f7286;
+    --line:#22303f; --accent:#56c2ff;
+    --wal:#56c2ff; --check:#4ade80; --arch:#f4b740; --scar:#fb7185; --fix:#4ade80; --ctrl:#c084fc;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  html,body{overflow-x:hidden;max-width:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+
+  #bar{position:fixed;top:0;left:0;height:3px;width:0;z-index:99;
+       background:linear-gradient(90deg,var(--wal),var(--fix));transition:width .08s linear}
+
+  .col{max-width:540px;margin:0 auto;padding:30px 20px 90px}
+
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;color:var(--arch);text-transform:uppercase}
+  h1{font-size:27px;line-height:1.25;margin:10px 0 0;letter-spacing:-.01em}
+  h1 em{font-style:normal;color:var(--accent)}
+  .dek{color:var(--mut);font-size:15px;margin:12px 0 0}
+  .hint{margin-top:18px;font-size:13px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .hint .a{color:var(--accent)}
+
+  /* the one-liner banner */
+  .tldr{margin:22px 0 0;border:1px solid #274; background:#0f1b16;border-radius:12px;padding:14px 16px;font-size:14px}
+  .tldr .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--fix);display:block;margin-bottom:6px;text-transform:uppercase}
+  .tldr b{color:#fff}
+
+  .chapter{margin:54px 0 0;padding-top:26px;border-top:1px solid var(--line)}
+  .chapter:first-of-type{border-top:0}
+  .ckick{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ca,var(--accent))}
+  .chapter h2{font-size:21px;margin:7px 0 0;letter-spacing:-.01em}
+  .cintro{color:var(--mut);font-size:14.5px;margin:8px 0 0}
+
+  .chain{margin:22px 0 0;display:flex;flex-direction:column}
+  .step{position:relative;background:var(--card);border:1px solid var(--line);
+        border-left:3px solid var(--ca,var(--accent));border-radius:12px;padding:12px 15px}
+  .step + .step{margin-top:30px}
+  .step + .step::before{content:'';position:absolute;left:50%;top:-26px;height:22px;width:2px;
+        transform:translateX(-50%);
+        background:repeating-linear-gradient(180deg,var(--ca,#3a4b5c) 0 5px,transparent 5px 10px)}
+  .step + .step::after{content:'▾';position:absolute;left:50%;top:-15px;transform:translateX(-50%);
+        color:var(--ca,var(--dim));font-size:12px;line-height:1}
+  .step .num{font-family:var(--mono);font-size:11px;color:var(--ca,var(--accent));font-weight:700}
+  .step .h{font-weight:700;font-size:15px;margin-top:1px}
+  .step .h b{color:#fff}
+  .step .m{font-family:var(--mono);font-size:11.5px;color:var(--ca,var(--accent));margin-top:3px;word-break:break-word}
+  .step .x{font-size:13px;color:var(--mut);margin-top:5px}
+
+  .ok{display:flex;align-items:center;gap:10px;margin:24px 2px 0;color:var(--fix);font-size:13.5px}
+  .ok::before,.ok::after{content:'';height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--line),transparent)}
+  .ok span{font-weight:700;white-space:nowrap}
+
+  .why{margin:22px 0 0;border:1px solid var(--line);border-radius:12px;background:var(--card2);
+       padding:13px 15px;font-size:13.5px;color:var(--ink)}
+  .why .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--arch);display:block;margin-bottom:5px;text-transform:uppercase}
+  .why b{color:#fff}
+
+  .order{margin-top:14px;border:1px solid #4a3410;background:#1a1305;border-radius:10px;
+         padding:10px 13px;font-size:13px;color:#ffd591}
+  .order b{color:#fff}
+
+  /* svg diagram wrapper */
+  .fig{margin:22px 0 0;border:1px solid var(--line);border-radius:12px;background:#0b131c;padding:16px 12px 10px;overflow-x:auto}
+  .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .figcap{font-size:12px;color:var(--dim);text-align:center;margin-top:8px;font-family:var(--mono)}
+
+  /* before/after numbers */
+  .stat{display:flex;gap:10px;margin:20px 0 0}
+  .statbox{flex:1;border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:var(--card)}
+  .statbox.b4{border-left:3px solid var(--scar)}
+  .statbox.af{border-left:3px solid var(--fix)}
+  .statbox .k{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .statbox .v{font-size:20px;font-weight:800;margin-top:4px}
+  .statbox.b4 .v{color:var(--scar)}
+  .statbox.af .v{color:var(--fix)}
+  .statbox .s{font-size:12px;color:var(--mut);margin-top:2px}
+
+  .bucket{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .bucket:last-child{border-bottom:0}
+  .bucket .ic{font-size:18px;flex:0 0 auto;margin-top:1px}
+  .bucket .bt{font-weight:700;font-size:14.5px}
+  .bucket .bx{font-size:13px;color:var(--mut)}
+  .bucket .bx code{font-family:var(--mono);font-size:12px;color:var(--wal)}
+
+  .scar{padding:16px 0;border-bottom:1px solid var(--line)}
+  .scar:last-child{border-bottom:0}
+  .scar .sym{font-family:var(--mono);font-size:12px;color:var(--scar);word-break:break-word}
+  .scar .ttl{font-weight:700;font-size:14.5px;margin-top:4px}
+  .scar .fixt{margin-top:6px;font-size:13px;color:var(--mut)}
+  .scar .fixt b{color:var(--fix)}
+
+  code.k{font-family:var(--mono);font-size:.9em;color:#bfe9ff;background:#0d1822;padding:1px 5px;border-radius:5px;word-break:break-word}
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+
+  @media(min-width:600px){ h1{font-size:30px} }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div class="col">
+
+  <div class="eyebrow">Postgres lesson · read top → bottom</div>
+  <h1>28 GB of Postgres <em>vanished</em><br>on one git push.<br>Here's exactly why.</h1>
+  <p class="dek">A real incident on the platform gym: the disk was filling at ~4.5 GB/day. The cause wasn't logs — it was Postgres refusing to throw away files it's designed to protect. Don't study it — just scroll and nod. Each beat fits in your head before the next.</p>
+  <div class="hint"><span class="a">↓</span> about 5 minutes. Start here.</div>
+
+  <div class="tldr"><span class="lbl">the one sentence that explains everything</span>
+    Postgres <b>refuses to delete a WAL file until every job that still needs it is done.</b> We accidentally created a job (archiving) that could <b>never finish</b> — so it never deleted anything. The fix wasn't "delete the files." It was <b>cancel the impossible job</b>, which let Postgres's normal cleanup resume.</div>
+
+  <!-- ========== CH 1 · THE SYMPTOM ========== -->
+  <div class="chapter" style="--ca:var(--scar)">
+    <div class="ckick">Part 1 — what we saw</div>
+    <h2>The disk was filling, and it wasn't logs</h2>
+    <p class="cintro">The obvious suspect (k8s pod logs) was a red herring — 182 MB, nothing. The real weight was in one place.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">symptom</div><div class="h">Disk climbing <b>~4.5 GB/day</b></div><div class="m">df -h / → 63% used, ~6 days left</div><div class="x">Left alone, the whole k3s node goes down when the root disk fills.</div></div>
+      <div class="step"><div class="num">trace</div><div class="h">One <b>PVC</b> held almost all of it</div><div class="m">backend-pg-1 → 28 G</div><div class="x">The CloudNativePG Postgres volume. Everything else was rounding error.</div></div>
+      <div class="step"><div class="num">shock</div><div class="h">The <b>tables</b> were tiny</div><div class="m">pgdata/base → 37 MB</div><div class="x">37 MB of real data, 28 GB of… something else. That something is WAL.</div></div>
+      <div class="step"><div class="num">culprit</div><div class="h"><b>1,773 WAL files</b>, stuck</div><div class="m">pgdata/pg_wal → 16 MB each</div><div class="x">Piling up since the cluster was rebuilt 6 days earlier. Never cleared.</div></div>
+    </div>
+
+    <div class="why"><span class="lbl">first instinct — and it's wrong</span>The reflex is <b>"can I just <code class="k">rm</code> them?"</b> No. These files aren't junk — they're Postgres's safety net, and only Postgres knows which are still needed. Delete the wrong one and the database won't recover on its next restart. The rest of this page is <b>why</b>, so you never reach for <code class="k">rm</code>.</div>
+    <div class="ok"><span>ok — 28 GB is WAL, not data</span></div>
+  </div>
+
+  <!-- ========== CH 2 · WHAT WAL IS ========== -->
+  <div class="chapter" style="--ca:var(--wal)">
+    <div class="ckick">Part 2 — the mechanism</div>
+    <h2>WAL is crash-insurance, and it's mandatory</h2>
+    <p class="cintro">WAL = <b>Write-Ahead Log</b>. Before Postgres changes real data, it writes down what it's <i>about</i> to do. That order is the whole trick.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">1</div><div class="h">A write comes in</div><div class="m">UPDATE users SET …</div><div class="x">Postgres does NOT touch the data file first.</div></div>
+      <div class="step"><div class="num">2</div><div class="h">It writes to <b>WAL first</b></div><div class="m">pg_wal/00000001…0001</div><div class="x">"Write-ahead" = the log entry lands before the data page. Always.</div></div>
+      <div class="step"><div class="num">3</div><div class="h"><i>Then</i> it updates the data page</div><div class="m">in memory, flushed later</div><div class="x">The real table change happens after the WAL record is safe.</div></div>
+      <div class="step"><div class="num">4</div><div class="h">If the server <b>crashes</b> here…</div><div class="m">power loss, OOM kill</div><div class="x">On restart, Postgres replays the WAL and rebuilds the exact consistent state.</div></div>
+    </div>
+
+    <div class="order"><b>Say this out loud once:</b> you cannot "disable WAL." It's not backup — it's the thing that makes Postgres crash-safe at all. When you hear yourself say "turn off WAL," you mean something else (keep reading).</div>
+    <div class="ok"><span>ok — log first, data second, replay on crash</span></div>
+  </div>
+
+  <!-- ========== CH 3 · THE CHECKPOINTER ========== -->
+  <div class="chapter" style="--ca:var(--check)">
+    <div class="ckick">Part 3 — the janitor</div>
+    <h2>WAL normally cleans up after itself</h2>
+    <p class="cintro">If WAL is written forever, why doesn't it grow forever? Because of a background job called the <b>checkpointer</b>. This part was never broken — remember that.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">1</div><div class="h">Every few minutes: a <b>CHECKPOINT</b></div><div class="m">default ~5 min</div><div class="x">Postgres flushes all pending changes into the real data files on disk.</div></div>
+      <div class="step"><div class="num">2</div><div class="h">Now old WAL is <b>redundant</b></div><div class="m">its changes are safely in the tables</div><div class="x">Any WAL older than the checkpoint is no longer needed for crash recovery.</div></div>
+      <div class="step"><div class="num">3</div><div class="h">So Postgres <b>recycles it</b></div><div class="m">deletes / renames for reuse</div><div class="x">This is the normal, constant cleanup. It's why pg_wal usually stays small.</div></div>
+    </div>
+
+    <div class="why"><span class="lbl">the mental hook</span>The checkpointer is a <b>janitor that only throws away WAL it's sure nobody needs.</b> Under normal life it keeps pg_wal near a small floor (~a few hundred MB). If pg_wal is 28 GB, the janitor isn't lazy — <b>something is telling it those files are still needed.</b></div>
+    <div class="ok"><span>ok — the janitor keeps WAL small on its own</span></div>
+  </div>
+
+  <!-- ========== CH 4 · ARCHIVING ADDS A VETO ========== -->
+  <div class="chapter" style="--ca:var(--arch)">
+    <div class="ckick">Part 4 — the twist that caused it all</div>
+    <h2>Backup adds a second lock on the door</h2>
+    <p class="cintro">Turn on <b>WAL archiving</b> (<code class="k">archive_mode=on</code>) and you get off-box backups + point-in-time recovery. But it changes the deletion rule. Now a WAL file needs <b>two</b> green lights, not one.</p>
+
+    <div class="fig">
+      <svg viewBox="0 0 360 210" role="img" aria-label="A WAL file is deleted only when both the checkpoint AND the archive conditions pass.">
+        <!-- condition A -->
+        <rect x="8" y="18" width="150" height="46" rx="9" fill="#101c12" stroke="#4ade80"/>
+        <text x="83" y="38" text-anchor="middle" fill="#4ade80" font-family="monospace" font-size="11">CONDITION A</text>
+        <text x="83" y="54" text-anchor="middle" fill="#cfe9d6" font-family="monospace" font-size="10.5">checkpoint passed it</text>
+        <!-- condition B -->
+        <rect x="8" y="86" width="150" height="46" rx="9" fill="#1c1608" stroke="#f4b740"/>
+        <text x="83" y="106" text-anchor="middle" fill="#f4b740" font-family="monospace" font-size="11">CONDITION B</text>
+        <text x="83" y="122" text-anchor="middle" fill="#f0dcae" font-family="monospace" font-size="10.5">archived to S3</text>
+        <!-- lines into gate -->
+        <path d="M158 41 H206 V64 H224" fill="none" stroke="#4ade80" stroke-width="1.6"/>
+        <path d="M158 109 H206 V86 H224" fill="none" stroke="#f4b740" stroke-width="1.6"/>
+        <!-- AND gate -->
+        <path d="M224 55 h20 a20 20 0 0 1 0 40 h-20 z" fill="#141b24" stroke="#56c2ff" stroke-width="1.6"/>
+        <text x="238" y="79" text-anchor="middle" fill="#56c2ff" font-family="monospace" font-size="11">AND</text>
+        <!-- out -->
+        <path d="M264 75 H300" fill="none" stroke="#56c2ff" stroke-width="1.6"/>
+        <polygon points="300,70 312,75 300,80" fill="#56c2ff"/>
+        <text x="300" y="60" text-anchor="middle" fill="#e8eef4" font-family="monospace" font-size="10">delete</text>
+        <text x="300" y="96" text-anchor="middle" fill="#93a4b6" font-family="monospace" font-size="10">the WAL</text>
+        <!-- caption row -->
+        <text x="180" y="168" text-anchor="middle" fill="#fb7185" font-family="monospace" font-size="11">Archiving broken  →  B never turns green</text>
+        <text x="180" y="188" text-anchor="middle" fill="#fb7185" font-family="monospace" font-size="11">→  AND never fires  →  nothing is deleted</text>
+      </svg>
+      <div class="figcap">deletion = checkpoint AND archived. break one input, the gate is stuck.</div>
+    </div>
+
+    <div class="why"><span class="lbl">the concept everyone misses</span>Archiving has <b>veto power</b> over cleanup. Before archiving, a WAL file was deletable the moment the checkpoint passed it. After archiving, it <b>also</b> has to be safely copied to S3 first. Two locks. <b>Both must open.</b></div>
+    <div class="ok"><span>ok — backup = a second lock the janitor must wait on</span></div>
+  </div>
+
+  <!-- ========== CH 5 · WHY IT PILED UP ========== -->
+  <div class="chapter" style="--ca:var(--scar)">
+    <div class="ckick">Part 5 — the stuck lock</div>
+    <h2>The backup had been failing since day one</h2>
+    <p class="cintro">Condition B (archived to S3) was failing <b>100% of the time, every 60 seconds, since the cluster was born.</b> So no WAL file ever earned its second green light.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">1</div><div class="h">Cluster was <b>rebuilt</b> 6 days ago</div><div class="m">fresh Postgres, same backup config</div><div class="x">WAL filenames restart from #1 on a fresh cluster.</div></div>
+      <div class="step"><div class="num">2</div><div class="h">It reused the same <b>serverName</b></div><div class="m">s3://cnpg/backend-pg-g1</div><div class="x">That S3 folder still held WAL from the cluster's <i>previous</i> life.</div></div>
+      <div class="step"><div class="num">3</div><div class="h">barman ran its <b>safety check</b></div><div class="m">"Expected empty archive"</div><div class="x">"This destination already has foreign WAL history — I refuse to write here."</div></div>
+      <div class="step"><div class="num">4</div><div class="h">Every archive <b>failed</b> → veto stuck</div><div class="m">ContinuousArchiving = False</div><div class="x">1,773 files, all with a green A, all waiting forever on a red B.</div></div>
+    </div>
+
+    <div class="why"><span class="lbl">the reframe that makes it click</span>Nothing malfunctioned in the cleanup path. <b>Postgres was doing its job perfectly</b> — correctly refusing to throw away data that hadn't been backed up yet. The bug was upstream (a name collision made backup impossible). The 28 GB was a <b>feature working on top of a broken input.</b></div>
+    <div class="ok"><span>ok — B could never turn green, so the pile grew</span></div>
+  </div>
+
+  <!-- ========== CH 6 · THE FIX ========== -->
+  <div class="chapter" style="--ca:var(--wal)">
+    <div class="ckick">Part 6 — the one-line fix</div>
+    <h2>Remove the backup, and the janitor drains it</h2>
+    <p class="cintro">We deleted the <code class="k">spec.backup</code> block from the cluster's GitOps YAML. We did <b>not</b> delete a single WAL file by hand. Watch the chain reaction.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">1</div><div class="h"><b>git push</b>: backup block removed</div><div class="m">apps/postgres/cluster.yaml</div><div class="x">One file, one commit. This is the entire manual act.</div></div>
+      <div class="step"><div class="num">2</div><div class="h">CNPG sets <b>archive_mode = off</b></div><div class="m">operator-derived, not a flag</div><div class="x">No backup destination → the operator turns archiving off for you.</div></div>
+      <div class="step"><div class="num">3</div><div class="h">Condition B <b>disappears</b></div><div class="m">the AND-gate loses an input</div><div class="x">Now a WAL file only needs condition A again — checkpoint passed it.</div></div>
+      <div class="step"><div class="num">4</div><div class="h">Next checkpoint: janitor <b>drains</b></div><div class="m">1,773 → 36 segments</div><div class="x">All of them qualified for deletion instantly. Recycled in minutes.</div></div>
+    </div>
+
+    <div class="stat">
+      <div class="statbox b4"><div class="k">before</div><div class="v">28 G</div><div class="s">1,773 WAL segments</div></div>
+      <div class="statbox af"><div class="k">after</div><div class="v">577 M</div><div class="s">36 segments · disk 63%→27%</div></div>
+    </div>
+
+    <div class="order"><b>"archive_mode" isn't a knob you set.</b> It's on CloudNativePG's fixed-parameter list — the operator owns it. Present <code class="k">spec.backup</code> → on. Absent → off. That's why the lever was <b>delete a block</b>, not <b>flip a setting</b>.</div>
+    <div class="ok"><span>ok — removed the impossible job, cleanup resumed</span></div>
+  </div>
+
+  <!-- ========== CH 7 · THREE CONTROLLERS ========== -->
+  <div class="chapter" style="--ca:var(--ctrl)">
+    <div class="ckick">Part 7 — where to actually look</div>
+    <h2>Three controllers fired, in three places</h2>
+    <p class="cintro">The trap: you stare at the ArgoCD UI waiting for "WAL cleaned ✅" — it never comes. Argo only knows about config. The real fix happens two layers deeper.</p>
+
+    <div class="chain">
+      <div class="step"><div class="num">layer 1</div><div class="h"><b>ArgoCD</b> — did my config apply?</div><div class="m">watch: the Argo UI</div><div class="x">Strips spec.backup, prunes ScheduledBackup. Sync flips green. Knows nothing about WAL.</div></div>
+      <div class="step" style="--ca:var(--arch)"><div class="num">layer 2</div><div class="h"><b>CNPG operator</b> — did Postgres accept it?</div><div class="m">watch: kubectl get cluster backend-pg</div><div class="x">Sets archive_mode=off, does a controlled pod restart. Lives in cnpg-system, invisible in the app tree.</div></div>
+      <div class="step" style="--ca:var(--check)"><div class="num">layer 3</div><div class="h"><b>Checkpointer</b> — is WAL shrinking?</div><div class="m">watch: du -sh pg_wal · df -h /</div><div class="x">Pure Postgres internals, no k8s at all. This is the layer that actually reclaims the disk.</div></div>
+    </div>
+
+    <div class="why"><span class="lbl">the portable lesson</span>GitOps only ever answers <b>"did my declared config apply."</b> It never answers <b>"did the underlying problem resolve."</b> Those are two different questions, checked with two different tools. Confirm the push in Argo, then drop to <code class="k">kubectl</code>/SSH for the truth.</div>
+    <div class="ok"><span>ok — config in Argo, reality in kubectl</span></div>
+  </div>
+
+  <!-- ========== CH 8 · KEPT vs GAVE UP ========== -->
+  <div class="chapter" style="--ca:var(--check)">
+    <div class="ckick">Part 8 — the tradeoff you chose</div>
+    <h2>Two uses of WAL — don't conflate them</h2>
+    <p class="cintro">"WAL" did two jobs here. We kept one and dropped the other on purpose. Knowing which is which is the whole point.</p>
+
+    <div style="margin-top:18px">
+      <div class="bucket"><div class="ic">🛟</div><div><div class="bt">WAL for crash recovery — <span style="color:var(--fix)">KEPT</span></div><div class="bx">Local, always on, mandatory. Server dies → replays WAL → consistent. <b>Untouched.</b></div></div></div>
+      <div class="bucket"><div class="ic">📦</div><div><div class="bt">WAL archiving for backup/PITR — <span style="color:var(--scar)">DROPPED</span></div><div class="bx">Off-box copy to S3, point-in-time recovery. This is what we turned off. It was <code>broken since day one</code> anyway, so we gave up nothing that worked.</div></div></div>
+      <div class="bucket"><div class="ic">🗓️</div><div><div class="bt">The replacement — <span style="color:var(--arch)">OWED</span></div><div class="bx">Plain <code>pg_dump</code> jobs for logical backups. Until those exist, backend-pg has <b>zero off-box backup.</b> Don't leave this "for later."</div></div></div>
+    </div>
+
+    <div class="order"><b>The real, permanent fix</b> (if you wanted archiving to keep working) was one line: bump <code class="k">serverName: g1 → g2</code> so the cluster writes to a fresh, empty S3 folder. We chose to drop archiving instead — a valid call, but a <i>choice</i>, not the only option.</div>
+    <div class="ok"><span>ok — crash-safe still; backups now owed</span></div>
+  </div>
+
+  <!-- ========== CH 9 · SCARS ========== -->
+  <div class="chapter" style="--ca:var(--scar)">
+    <div class="ckick">Part 9 — the scars</div>
+    <h2>What bites, and the reflex</h2>
+    <p class="cintro">The reflexes to keep. Read these before the next Postgres-on-k8s incident.</p>
+
+    <div style="margin-top:16px">
+      <div class="scar"><div class="sym">pg_wal = 28 G · tables = 37 MB</div><div class="ttl">"The database is huge" — no, the WAL is</div><div class="fixt">Always split <code class="k">pgdata/base</code> (real data) from <code class="k">pgdata/pg_wal</code> (the log). <b>A giant pg_wal means archiving is stuck, not that your data grew.</b></div></div>
+      <div class="scar"><div class="sym">rm 00000001…0042</div><div class="ttl">Deleting WAL by hand to "free space"</div><div class="fixt">Never. Only the checkpointer knows which are still needed for crash recovery. <b>Fix the blocker and let Postgres delete them itself.</b></div></div>
+      <div class="scar"><div class="sym">"disable WAL"</div><div class="ttl">Confusing WAL with WAL archiving</div><div class="fixt">WAL (crash recovery) can't be disabled. <b>Archiving (backup) can</b> — by removing the backup destination. Different things, different consequences.</div></div>
+      <div class="scar"><div class="sym">serverName: backend-pg-g1 (reused)</div><div class="ttl">A rebuilt cluster writing into old WAL</div><div class="fixt">Fresh cluster + same S3 serverName = collision = "Expected empty archive." <b>Bump the generation marker (g1→g2) on every rebuild.</b></div></div>
+      <div class="scar"><div class="sym">firstRecoverabilityPoint: None</div><div class="ttl">Backups that never succeeded once</div><div class="fixt">Archiving being "configured" ≠ working. <b>Verify a real recovery point exists</b> — a green config with no successful backup is a silent zero.</div></div>
+      <div class="scar"><div class="sym">staring at ArgoCD for the fix</div><div class="ttl">Expecting GitOps to report disk health</div><div class="fixt">Argo answers "did config apply," never "did the problem resolve." <b>Confirm the push in Argo, verify the result in kubectl/SSH.</b></div></div>
+    </div>
+    <div class="ok"><span>ok — that's the whole incident</span></div>
+  </div>
+
+  <footer>
+    Real incident · CloudNativePG on k3s · backend-pg · 28 G → 577 M on one <code class="k">git push</code>.<br>
+    One self-contained file — no network, no libraries. The next rep is yours: reproduce the collision in a local kind/k3d cluster, watch pg_wal grow, remove the block, watch it drain.
+  </footer>
+
+</div>
+<script>
+  var bar=document.getElementById('bar');
+  function p(){var h=document.documentElement;var s=h.scrollTop||document.body.scrollTop;
+    var max=(h.scrollHeight-h.clientHeight)||1;bar.style.width=(100*s/max)+'%';}
+  addEventListener('scroll',p,{passive:true});addEventListener('resize',p);p();
+</script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Database backups — PG, MySQL & Velero on the platform gym</title>
+<style>
+  :root{
+    --bg:#0c1117; --card:#141b24; --card2:#18222e; --ink:#e8eef4; --mut:#93a4b6; --dim:#5f7286;
+    --line:#22303f; --accent:#56c2ff;
+    --pg:#56c2ff; --my:#f4b740; --velero:#4ade80; --scar:#fb7185; --fix:#4ade80; --ctrl:#c084fc;
+    --mono:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  html,body{overflow-x:hidden;max-width:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+
+  #bar{position:fixed;top:0;left:0;height:3px;width:0;z-index:99;
+       background:linear-gradient(90deg,var(--pg),var(--fix));transition:width .08s linear}
+
+  /* ---- shared lessons sidebar ---- */
+  #navbtn{position:fixed;top:10px;left:10px;z-index:120;width:42px;height:42px;border-radius:11px;
+    background:var(--card);border:1px solid var(--line);color:var(--ink);font-size:18px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center}
+  #nav{position:fixed;top:0;left:0;bottom:0;width:252px;z-index:115;background:#0a1018;
+    border-right:1px solid var(--line);padding:22px 15px 26px;transform:translateX(-100%);
+    transition:transform .22s ease;overflow-y:auto}
+  #nav.open{transform:none}
+  #navbd{position:fixed;inset:0;z-index:110;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .22s}
+  #navbd.open{opacity:1;pointer-events:auto}
+  #nav .nt{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:2px 4px 14px}
+  #nav a{display:block;padding:10px 12px;border-radius:10px;color:var(--mut);text-decoration:none;font-size:14px;font-weight:600;margin-bottom:5px;border:1px solid transparent}
+  #nav a:hover{background:var(--card);color:var(--ink)}
+  #nav a.on{background:var(--card2);color:#fff;border-color:var(--line)}
+  #nav a .d{display:block;font-size:11.5px;font-weight:400;color:var(--dim);margin-top:2px}
+  #nav a.on .d{color:var(--mut)}
+  @media(min-width:1024px){
+    #navbtn{display:none}
+    #nav{transform:none}
+    #navbd{display:none!important}
+    body{padding-left:252px}
+    #bar{left:252px}
+  }
+
+  .col{max-width:560px;margin:0 auto;padding:30px 18px 90px}
+
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;color:var(--my);text-transform:uppercase}
+  h1{font-size:27px;line-height:1.25;margin:10px 0 0;letter-spacing:-.01em}
+  h1 em{font-style:normal;color:var(--accent)}
+  .dek{color:var(--mut);font-size:15px;margin:12px 0 0}
+  .hint{margin-top:18px;font-size:13px;color:var(--dim);display:flex;align-items:center;gap:8px}
+  .hint .a{color:var(--accent)}
+
+  .tldr{margin:22px 0 0;border:1px solid #274; background:#0f1b16;border-radius:12px;padding:14px 16px;font-size:14px}
+  .tldr .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--fix);display:block;margin-bottom:6px;text-transform:uppercase}
+  .tldr b{color:#fff}
+
+  .chapter{margin:52px 0 0;padding-top:26px;border-top:1px solid var(--line)}
+  .chapter:first-of-type{border-top:0}
+  .ckick{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ca,var(--accent))}
+  .chapter h2{font-size:21px;margin:7px 0 0;letter-spacing:-.01em}
+  .cintro{color:var(--mut);font-size:14.5px;margin:8px 0 14px}
+
+  .fig{margin:16px 0 0;border:1px solid var(--line);border-radius:14px;background:#0b131c;
+       padding:16px 10px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .fig .mermaid{display:flex;justify-content:center;min-width:0}
+  .fig .mermaid svg{max-width:100%;height:auto}
+  .figcap{font-size:12px;color:var(--dim);text-align:center;margin-top:10px;font-family:var(--mono)}
+  .figcap b{color:var(--my)}
+
+  .ok{display:flex;align-items:center;gap:10px;margin:22px 2px 0;color:var(--fix);font-size:13.5px}
+  .ok::before,.ok::after{content:'';height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--line),transparent)}
+  .ok span{font-weight:700;white-space:nowrap}
+
+  .why{margin:18px 0 0;border:1px solid var(--line);border-radius:12px;background:var(--card2);
+       padding:13px 15px;font-size:13.5px;color:var(--ink)}
+  .why .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--my);display:block;margin-bottom:5px;text-transform:uppercase}
+  .why b{color:#fff}
+
+  .order{margin-top:14px;border:1px solid #4a3410;background:#1a1305;border-radius:10px;
+         padding:10px 13px;font-size:13px;color:#ffd591}
+  .order b{color:#fff}
+
+  /* comparison + scorecard tables */
+  .tbl{margin:16px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .tbl .row{display:grid;grid-template-columns:1.15fr 1fr 1fr;font-size:12.5px}
+  .tbl .row + .row{border-top:1px solid var(--line)}
+  .tbl .row.head{background:var(--card2);font-weight:700;color:#fff;font-size:11.5px}
+  .tbl .c{padding:9px 10px;border-left:1px solid var(--line)}
+  .tbl .c:first-child{border-left:0;color:var(--mut);font-weight:600}
+  .tbl code{font-family:var(--mono);font-size:11.5px;color:#bfe9ff}
+  .tbl .pg{color:var(--pg)} .tbl .my{color:var(--my)}
+
+  .score{margin:16px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .score .r{display:grid;grid-template-columns:1.3fr .5fr 1.2fr;font-size:13px;align-items:center}
+  .score .r + .r{border-top:1px solid var(--line)}
+  .score .r.head{background:var(--card2);font-weight:700;font-size:11.5px;color:#fff}
+  .score .r .cc{padding:10px}
+  .score .r .cc:first-child{font-weight:700}
+  .score .yes{color:var(--fix);font-weight:800}
+  .score .no{color:var(--scar);font-weight:800}
+  .score .sub{font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+
+  .scar{padding:16px 0;border-bottom:1px solid var(--line)}
+  .scar:last-child{border-bottom:0}
+  .scar .sym{font-family:var(--mono);font-size:12px;color:var(--scar);word-break:break-word}
+  .scar .ttl{font-weight:700;font-size:14.5px;margin-top:4px}
+  .scar .fixt{margin-top:6px;font-size:13px;color:var(--mut)}
+  .scar .fixt b{color:var(--fix)}
+
+  code.k{font-family:var(--mono);font-size:.9em;color:#bfe9ff;background:#0d1822;padding:1px 5px;border-radius:5px;word-break:break-word}
+  footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
+
+  @media(min-width:600px){ h1{font-size:30px} }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+
+<button id="navbtn" aria-label="Lessons menu">☰</button>
+<div id="navbd"></div>
+<nav id="nav">
+  <p class="nt">Platform Gym · Lessons</p>
+  <a href="./index.html"><b>System map</b><span class="d">the whole platform, top → bottom</span></a>
+  <a href="./postgres-wal.html"><b>Postgres WAL incident</b><span class="d">why 28 GB vanished on one push</span></a>
+  <a href="./database-backups.html" class="on"><b>Database backups</b><span class="d">PG vs MySQL, operators &amp; Velero</span></a>
+</nav>
+
+<div class="col">
+
+  <div class="eyebrow">Backups lesson · diagram-first · read top → bottom</div>
+  <h1>Two databases, two operators,<br>three ways to <em>back them up</em>.</h1>
+  <p class="dek">Your cluster runs Postgres <i>and</i> MariaDB, each with its own controller, plus Velero on top. They barely talk to each other — by design. Here's the whole backup landscape, one diagram at a time.</p>
+  <div class="hint"><span class="a">↓</span> about 6 minutes. Start here.</div>
+
+  <div class="tldr"><span class="lbl">the one sentence that explains everything</span>
+    Every database is <b>two apps</b> — an <b>operator</b> (the controller, from Helm) and an <b>instance</b> (the actual DB, your YAML). Postgres and MariaDB each have their own operator; they share only plumbing (S3 creds, namespace), not logic. Backups come in <b>three independent layers</b>.</div>
+
+  <!-- CH1 -->
+  <div class="chapter" style="--ca:var(--accent)">
+    <div class="ckick">Part 1 — the pattern</div>
+    <h2>Every database is two apps</h2>
+    <p class="cintro">Same CRD+operator shape you already know. One app installs the brain; another app is the actual database it grows.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  H["Helm installs<br/>the OPERATOR (controller)"]:::op --> W["Operator watches<br/>for its CR objects"]:::op
+  W --> C["You commit a CR<br/>= the INSTANCE (your YAML)"]:::inst
+  C --> R["Operator builds the real thing:<br/>StatefulSet · PVC · Service · backup Jobs"]:::good
+  classDef op fill:#1a1226,stroke:#c084fc,color:#e9ddff;
+  classDef inst fill:#101a24,stroke:#56c2ff,color:#bfe9ff;
+  classDef good fill:#101c12,stroke:#4ade80,color:#cfe9d6;
+    </pre>
+    <div class="figcap">operator = the brain · instance = the database it manages.</div></div>
+    <div class="why"><span class="lbl">the mental hook</span>You never create a Pod or PVC for a database by hand. You commit a <b>Custom Resource</b> describing what you want, and the operator does the low-level work — including wiring up its backups.</div>
+    <div class="ok"><span>ok — operator + instance, every time</span></div>
+  </div>
+
+  <!-- CH2 -->
+  <div class="chapter" style="--ca:var(--pg)">
+    <div class="ckick">Part 2 — "is there a mysql controller?"</div>
+    <h2>Yes — two full stacks, side by side</h2>
+    <p class="cintro">Postgres has CloudNativePG. MariaDB (the MySQL family) has mariadb-operator. Direct analogs. Both are just operator + instance.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  A["cloudnative-pg<br/>operator · Helm"]:::op --> A2["kind: Cluster<br/>→ backend-pg<br/>postgresql.cnpg.io"]:::pg
+  B["mariadb-operator<br/>operator · Helm"]:::op --> B2["kind: MariaDB<br/>→ wordpress-db<br/>k8s.mariadb.com"]:::my
+  classDef op fill:#1a1226,stroke:#c084fc,color:#e9ddff;
+  classDef pg fill:#0e1f2b,stroke:#56c2ff,color:#bfe9ff;
+  classDef my fill:#1f1808,stroke:#f4b740,color:#f0dcae;
+    </pre>
+    <div class="figcap">two independent stacks — different API groups, different operators.</div></div>
+    <div class="tbl">
+      <div class="row head"><div class="c">layer</div><div class="c pg">Postgres</div><div class="c my">MariaDB</div></div>
+      <div class="row"><div class="c">operator (Helm)</div><div class="c"><code>cloudnative-pg</code></div><div class="c"><code>mariadb-operator</code></div></div>
+      <div class="row"><div class="c">instance (your CR)</div><div class="c"><code>apps/postgres</code></div><div class="c"><code>apps/mariadb</code></div></div>
+      <div class="row"><div class="c">CR kind</div><div class="c"><code>Cluster</code></div><div class="c"><code>MariaDB</code></div></div>
+      <div class="row"><div class="c">the DB it runs</div><div class="c">backend-pg</div><div class="c">wordpress-db</div></div>
+    </div>
+    <div class="ok"><span>ok — a mysql controller exists, mirror of CNPG</span></div>
+  </div>
+
+  <!-- CH3 -->
+  <div class="chapter" style="--ca:var(--ctrl)">
+    <div class="ckick">Part 3 — how they interact</div>
+    <h2>Mostly, they don't</h2>
+    <p class="cintro">No coordination layer. Each operator reconciles its own CRs in its own lane. They only share a bit of plumbing.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  S["cnpg-s3-creds Secret<br/>(ESO ← OpenBao) — SHARED"]:::warn
+  PG["backend-pg<br/>(CNPG)"]:::pg --> B1["bucket: s3://cnpg"]:::good
+  MDB["wordpress-db<br/>(MariaDB)"]:::my --> B2["bucket: s3://mariadb"]:::good
+  S -.reused by.-> PG
+  S -.reused by.-> MDB
+  classDef pg fill:#0e1f2b,stroke:#56c2ff,color:#bfe9ff;
+  classDef my fill:#1f1808,stroke:#f4b740,color:#f0dcae;
+  classDef warn fill:#1c1608,stroke:#f4b740,color:#f0dcae;
+  classDef good fill:#101c12,stroke:#4ade80,color:#cfe9d6;
+    </pre>
+    <div class="figcap">shared: one S3 user + the <code>database</code> namespace · separate: buckets &amp; logic.</div></div>
+    <div class="why"><span class="lbl">the thing to remember</span>The only "interaction" is <b>shared plumbing</b> — the same S3 credential Secret, the same namespace, the same storage provider (different buckets). No app calls another. That's a feature: each DB fails and recovers on its own.</div>
+    <div class="ok"><span>ok — independent operators, shared plumbing</span></div>
+  </div>
+
+  <!-- CH4 -->
+  <div class="chapter" style="--ca:var(--my)">
+    <div class="ckick">Part 4 — the core difference</div>
+    <h2>Postgres can do PITR. MariaDB (here) can't.</h2>
+    <p class="cintro">This is the real split between the two. It's why the WAL incident was a Postgres story and never a MariaDB one.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  PG["Postgres / CNPG"]:::pg --> PGB["WAL stream + base backup<br/>= restore to ANY second (PITR)"]:::good
+  MY["MariaDB / operator"]:::my --> MYB["scheduled mariadb-dump<br/>every 6h = snapshots in time"]:::warn
+  PGB --> N1["cost: WAL machinery<br/>(the 28 GB pileup risk)"]:::info
+  MYB --> N2["cost: up to 6h of data<br/>lost on restore"]:::info
+  classDef pg fill:#0e1f2b,stroke:#56c2ff,color:#bfe9ff;
+  classDef my fill:#1f1808,stroke:#f4b740,color:#f0dcae;
+  classDef good fill:#101c12,stroke:#4ade80,color:#cfe9d6;
+  classDef warn fill:#1c1608,stroke:#f4b740,color:#f0dcae;
+  classDef info fill:#101a24,stroke:#5f7286,color:#9fb0c2;
+    </pre>
+    <div class="figcap">continuous PITR vs coarse scheduled dumps — different tradeoffs, both valid.</div></div>
+    <div class="order"><b>Doc drift caught:</b> <code class="k">apps/mariadb/backup.yaml</code>'s comment says "every 2h" but the cron is <code class="k">0 */6 * * *</code> = every <b>6h</b>. Fix the comment so the next person isn't misled.</div>
+    <div class="ok"><span>ok — PITR is a Postgres superpower MariaDB lacks here</span></div>
+  </div>
+
+  <!-- CH5 -->
+  <div class="chapter" style="--ca:var(--velero)">
+    <div class="ckick">Part 5 — the three layers</div>
+    <h2>Three independent backup systems</h2>
+    <p class="cintro">Two are database-aware (row-level). The third, Velero, is not — it snapshots files and k8s objects. They cover different things.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  L1["① CNPG backup<br/>Postgres ROWS · PITR-capable"]:::pg
+  L2["② mariadb-operator Backup<br/>MariaDB ROWS · 6h dumps"]:::my
+  L3["③ Velero Schedule<br/>namespace objects + PVC FILES"]:::good
+  L3 --> V["covers wp-content media<br/>(files on disk, not in any DB)"]:::info
+  classDef pg fill:#0e1f2b,stroke:#56c2ff,color:#bfe9ff;
+  classDef my fill:#1f1808,stroke:#f4b740,color:#f0dcae;
+  classDef good fill:#101c12,stroke:#4ade80,color:#cfe9d6;
+  classDef info fill:#101a24,stroke:#5f7286,color:#9fb0c2;
+    </pre>
+    <div class="figcap">rows live in databases; media files live on a PVC — Velero catches the latter.</div></div>
+    <div class="why"><span class="lbl">why WordPress needs two of them</span>A full WordPress restore = <b>MariaDB dump</b> (the posts/settings rows) <b>+ Velero</b> (the uploaded images on the wp-content volume). Neither alone is enough. That's why both run at the same 6h cadence.</div>
+    <div class="ok"><span>ok — rows via DB backup, files via Velero</span></div>
+  </div>
+
+  <!-- CH6 -->
+  <div class="chapter" style="--ca:var(--pg)">
+    <div class="ckick">Part 6 — the Postgres menu</div>
+    <h2>Ways to back up backend-pg</h2>
+    <p class="cintro">Right now backend-pg has <b>zero backup</b> — you removed CNPG's block in the WAL incident. Here's the menu to put one back.</p>
+    <div class="fig"><pre class="mermaid">
+flowchart TD
+  Q{"Do you need<br/>point-in-time recovery?"}:::acc
+  Q -->|"yes"| O1["Re-enable CNPG WAL + base<br/>bump serverName g1 → g2"]:::good
+  Q -->|"no — keep it simple"| O2["pg_dump CronJob → S3<br/>(mirrors MariaDB's approach)"]:::pg
+  Q -->|"middle ground"| O3["CNPG base backups only<br/>no continuous WAL, no 28 GB risk"]:::warn
+  X["✘ Velero on the live PG PVC<br/>crash-consistent only — NOT safe as primary"]:::bad
+  classDef acc fill:#0e2230,stroke:#56c2ff,color:#e8eef4;
+  classDef good fill:#101c12,stroke:#4ade80,color:#cfe9d6;
+  classDef pg fill:#0e1f2b,stroke:#56c2ff,color:#bfe9ff;
+  classDef warn fill:#1c1608,stroke:#f4b740,color:#f0dcae;
+  classDef bad fill:#1e1013,stroke:#fb7185,color:#f6c9d1;
+    </pre>
+    <div class="figcap">pick by whether PITR is worth the WAL machinery you just fought.</div></div>
+    <div class="order"><b>Why not Velero for Postgres?</b> Velero snapshots the raw <code class="k">pgdata</code> filesystem — only crash-consistent, not guaranteed clean unless the DB is quiesced. CNPG's own backup is database-aware and safe. Right tool per job.</div>
+    <div class="ok"><span>ok — pg_dump is the simple symmetric choice</span></div>
+  </div>
+
+  <!-- CH7 -->
+  <div class="chapter" style="--ca:var(--scar)">
+    <div class="ckick">Part 7 — where you stand today</div>
+    <h2>The current backup scorecard</h2>
+    <p class="cintro">As of the last push. One gap stands out — and it's the database your app actually depends on.</p>
+    <div class="score">
+      <div class="r head"><div class="cc">data</div><div class="cc">safe?</div><div class="cc">how</div></div>
+      <div class="r"><div class="cc">backend-pg <span class="sub">app data</span></div><div class="cc"><span class="no">NONE</span></div><div class="cc">removed — <code class="k">pg_dump</code> owed</div></div>
+      <div class="r"><div class="cc">wordpress-db <span class="sub">MariaDB</span></div><div class="cc"><span class="yes">✔ 6h</span></div><div class="cc">operator <code class="k">Backup</code> → s3://mariadb</div></div>
+      <div class="r"><div class="cc">wp-content <span class="sub">media files</span></div><div class="cc"><span class="yes">✔ 6h</span></div><div class="cc">Velero + Kopia → s3</div></div>
+    </div>
+    <div class="why"><span class="lbl">the actionable gap</span><b>backend-pg is the only unprotected data in the cluster.</b> Everything else has a recent, working backup. Closing this is the single highest-value next move — either a <code class="k">pg_dump</code> CronJob or re-enabling CNPG with the <code class="k">g2</code> bump.</div>
+    <div class="ok"><span>ok — backend-pg is the one gap left</span></div>
+  </div>
+
+  <!-- CH8 -->
+  <div class="chapter" style="--ca:var(--scar)">
+    <div class="ckick">Part 8 — the scars</div>
+    <h2>What bites, and the reflex</h2>
+    <p class="cintro">The reflexes to keep across both databases.</p>
+    <div style="margin-top:16px">
+      <div class="scar"><div class="sym">operator ≠ instance</div><div class="ttl">Confusing the controller with the database</div><div class="fixt"><code class="k">cloudnative-pg</code> is the brain; <code class="k">apps/postgres</code> is the DB. Deleting the operator app orphans every DB it runs. <b>Know which app you're touching.</b></div></div>
+      <div class="scar"><div class="sym"># every 2h  (cron says 6h)</div><div class="ttl">Comment drift on the MariaDB backup</div><div class="fixt">The header claims 2h; <code class="k">0 */6 * * *</code> is 6h. <b>Trust the cron, fix the comment</b> — stale docs cause false confidence about RPO.</div></div>
+      <div class="scar"><div class="sym">restore MariaDB → images still 404</div><div class="ttl">Restoring the DB but not the files</div><div class="fixt">WordPress rows live in MariaDB; uploads live on a PVC. <b>A real restore needs the DB dump AND the Velero file backup.</b></div></div>
+      <div class="scar"><div class="sym">velero backup pg-live</div><div class="ttl">Using Velero as a Postgres backup</div><div class="fixt">Crash-consistent volume snapshots can restore a corrupt DB. <b>Use CNPG's own backup for Postgres; keep Velero for files.</b></div></div>
+      <div class="scar"><div class="sym">"backups are configured" ✓</div><div class="ttl">Configured ≠ succeeding</div><div class="fixt">CNPG showed a green backup block while archiving failed 100%. <b>Verify a real recovery point exists</b>, don't trust that config is present.</div></div>
+    </div>
+    <div class="ok"><span>ok — that's the backup landscape</span></div>
+  </div>
+
+  <footer>
+    Platform gym · CloudNativePG + mariadb-operator + Velero on k3s.<br>
+    One self-contained page (diagrams via Mermaid, scale to your screen). Next move: close the backend-pg gap.
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      background: '#0b131c', primaryColor: '#141b24', primaryTextColor: '#e8eef4',
+      primaryBorderColor: '#22303f', lineColor: '#5f7286', tertiaryColor: '#0b131c',
+      fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",
+      fontSize: '14px'
+    },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis', nodeSpacing: 34, rankSpacing: 40 }
+  });
+  await mermaid.run();
+
+  // sidebar toggle
+  var nb=document.getElementById('navbtn'),nv=document.getElementById('nav'),bd=document.getElementById('navbd');
+  function tog(){nv.classList.toggle('open');bd.classList.toggle('open');}
+  nb&&nb.addEventListener('click',tog); bd&&bd.addEventListener('click',tog);
+
+  // scroll-progress bar
+  var bar=document.getElementById('bar');
+  function p(){var h=document.documentElement;var s=h.scrollTop||document.body.scrollTop;
+    var max=(h.scrollHeight-h.clientHeight)||1;bar.style.width=(100*s/max)+'%';}
+  addEventListener('scroll',p,{passive:true});addEventListener('resize',p);p();
+</script>
+</body>
+</html>
